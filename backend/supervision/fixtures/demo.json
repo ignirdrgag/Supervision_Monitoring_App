@@ -1,0 +1,122 @@
+[
+  {
+    "model": "supervision.server",
+    "pk": 1,
+    "fields": {
+      "hostname": "srv-core-01",
+      "ip_address": "10.10.0.11",
+      "os_family": "Ubuntu Server 22.04",
+      "environment": "production",
+      "owner": "Equipe reseau",
+      "location": "Datacenter Douala",
+      "status": "online",
+      "last_seen": "2026-05-01T08:00:00Z",
+      "created_at": "2026-05-01T08:00:00Z",
+      "updated_at": "2026-05-01T08:00:00Z"
+    }
+  },
+  {
+    "model": "supervision.server",
+    "pk": 2,
+    "fields": {
+      "hostname": "srv-db-01",
+      "ip_address": "10.10.0.21",
+      "os_family": "Debian 12",
+      "environment": "production",
+      "owner": "Equipe donnees",
+      "location": "Datacenter Douala",
+      "status": "degraded",
+      "last_seen": "2026-05-01T08:04:00Z",
+      "created_at": "2026-05-01T08:00:00Z",
+      "updated_at": "2026-05-01T08:04:00Z"
+    }
+  },
+  {
+    "model": "supervision.server",
+    "pk": 3,
+    "fields": {
+      "hostname": "srv-app-01",
+      "ip_address": "10.10.0.31",
+      "os_family": "Windows Server 2022",
+      "environment": "production",
+      "owner": "Equipe applications",
+      "location": "Agence Yaounde",
+      "status": "online",
+      "last_seen": "2026-05-01T08:05:00Z",
+      "created_at": "2026-05-01T08:00:00Z",
+      "updated_at": "2026-05-01T08:05:00Z"
+    }
+  },
+  {
+    "model": "supervision.service",
+    "pk": 1,
+    "fields": {"server": 1, "name": "nginx", "port": 443, "protocol": "tcp", "status": "running", "criticality": "critical", "last_check": "2026-05-01T08:05:00Z"}
+  },
+  {
+    "model": "supervision.service",
+    "pk": 2,
+    "fields": {"server": 2, "name": "postgresql", "port": 5432, "protocol": "tcp", "status": "degraded", "criticality": "critical", "last_check": "2026-05-01T08:05:00Z"}
+  },
+  {
+    "model": "supervision.service",
+    "pk": 3,
+    "fields": {"server": 3, "name": "erp-api", "port": 8080, "protocol": "tcp", "status": "running", "criticality": "high", "last_check": "2026-05-01T08:05:00Z"}
+  },
+  {
+    "model": "supervision.metricsnapshot",
+    "pk": 1,
+    "fields": {"server": 1, "cpu_usage": "42.50", "memory_usage": "58.20", "disk_usage": "63.10", "network_latency": "12.40", "created_at": "2026-05-01T08:05:00Z"}
+  },
+  {
+    "model": "supervision.metricsnapshot",
+    "pk": 2,
+    "fields": {"server": 2, "cpu_usage": "91.20", "memory_usage": "88.10", "disk_usage": "79.30", "network_latency": "28.60", "created_at": "2026-05-01T08:05:00Z"}
+  },
+  {
+    "model": "supervision.metricsnapshot",
+    "pk": 3,
+    "fields": {"server": 3, "cpu_usage": "55.00", "memory_usage": "62.70", "disk_usage": "48.90", "network_latency": "18.10", "created_at": "2026-05-01T08:05:00Z"}
+  },
+  {
+    "model": "supervision.alert",
+    "pk": 1,
+    "fields": {
+      "server": 2,
+      "service": 2,
+      "title": "Saturation CPU et memoire sur la base de donnees",
+      "description": "PostgreSQL montre une latence elevee et une consommation anormale.",
+      "severity": "critical",
+      "status": "open",
+      "created_at": "2026-05-01T08:06:00Z",
+      "resolved_at": null
+    }
+  },
+  {
+    "model": "supervision.alert",
+    "pk": 2,
+    "fields": {
+      "server": 1,
+      "service": 1,
+      "title": "Certificat TLS a renouveler",
+      "description": "Expiration prevue dans moins de 15 jours.",
+      "severity": "warning",
+      "status": "open",
+      "created_at": "2026-05-01T08:02:00Z",
+      "resolved_at": null
+    }
+  },
+  {
+    "model": "supervision.administrationaction",
+    "pk": 1,
+    "fields": {
+      "action_type": "run_diagnostic",
+      "target_server": 2,
+      "target_service": 2,
+      "requested_by": "agent-ia",
+      "status": "pending",
+      "notes": "Collecter les slow queries et verifier la pression memoire.",
+      "created_at": "2026-05-01T08:07:00Z",
+      "updated_at": "2026-05-01T08:07:00Z"
+    }
+  }
+]

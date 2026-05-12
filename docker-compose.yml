@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py loaddata demo &&
+             python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "8000:8000"
+    environment:
+      - ALERT_EMAIL_ENABLED=${ALERT_EMAIL_ENABLED:-true}
+      - ALERT_EMAIL_RECIPIENTS=${ALERT_EMAIL_RECIPIENTS:-monitoringentreprise@gmail.com}
+      - EMAIL_BACKEND=${EMAIL_BACKEND:-django.core.mail.backends.smtp.EmailBackend}
+      - EMAIL_HOST=${EMAIL_HOST:-smtp.gmail.com}
+      - EMAIL_PORT=${EMAIL_PORT:-587}
+      - EMAIL_HOST_USER=${EMAIL_HOST_USER:-monitoringentreprise@gmail.com}
+      - EMAIL_HOST_PASSWORD=${EMAIL_HOST_PASSWORD:-}
+      - EMAIL_USE_TLS=${EMAIL_USE_TLS:-true}
+      - EMAIL_SSL_VERIFY=${EMAIL_SSL_VERIFY:-true}
+      - EMAIL_TIMEOUT=${EMAIL_TIMEOUT:-20}
+      - DEFAULT_FROM_EMAIL=${DEFAULT_FROM_EMAIL:-monitoringentreprise@gmail.com}
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      context: ./frontend
+    command: npm run dev
+    environment:
+      - VITE_API_BASE=http://localhost:8000/api
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
