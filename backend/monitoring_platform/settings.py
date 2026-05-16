@@ -20,7 +20,7 @@ load_env_file(BASE_DIR.parent / ".env")
 
 SECRET_KEY = "dev-supervision-monitoring-secret"
 DEBUG = True
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "192.168.1.116", "testserver"]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -86,6 +86,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://192.168.1.116:5173",
 ]
 
 REST_FRAMEWORK = {

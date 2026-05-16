@@ -14,6 +14,8 @@ from pathlib import Path
 
 
 AGENT_VERSION = "1.1.0"
+TCP_STATE_ESTABLISHED = "01"
+TCP_STATE_LISTEN = "0A"
 
 
 def read_first_line(path, default=""):
@@ -83,6 +85,111 @@ def get_latency(host="8.8.8.8"):
         return 999
 
 
+def read_network_counters():
+    counters = {"rx_bytes": 0, "tx_bytes": 0}
+    try:
+        lines = Path("/proc/net/dev").read_text(encoding="utf-8").splitlines()[2:]
+    except (FileNotFoundError, PermissionError):
+        return counters
+
+    for line in lines:
+        if ":" not in line:
+            continue
+        interface, raw_values = line.split(":", 1)
+        interface = interface.strip()
+        if interface == "lo":
+            continue
+        values = raw_values.split()
+        if len(values) < 16:
+            continue
+        counters["rx_bytes"] += int(values[0])
+        counters["tx_bytes"] += int(values[8])
+    return counters
+
+
+def get_network_rate(sample_seconds=1.0):
+    sample_seconds = max(sample_seconds, 0.1)
+    first = read_network_counters()
+    time.sleep(sample_seconds)
+    second = read_network_counters()
+    return {
+        "rx_mbps": round(((second["rx_bytes"] - first["rx_bytes"]) * 8) / sample_seconds / 1_000_000, 2),
+        "tx_mbps": round(((second["tx_bytes"] - first["tx_bytes"]) * 8) / sample_seconds / 1_000_000, 2),
+    }
+
+
+def parse_proc_tcp(path):
+    rows = []
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()[1:]
+    except (FileNotFoundError, PermissionError):
+        return rows
+
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        local_address = parts[1]
+        state = parts[3]
+        try:
+            port = int(local_address.rsplit(":", 1)[1], 16)
+        except (IndexError, ValueError):
+            continue
+        rows.append({"port": port, "state": state})
+    return rows
+
+
+def get_tcp_summary():
+    rows = parse_proc_tcp("/proc/net/tcp") + parse_proc_tcp("/proc/net/tcp6")
+    listening_ports = sorted({row["port"] for row in rows if row["state"] == TCP_STATE_LISTEN})
+    established_connections = sum(1 for row in rows if row["state"] == TCP_STATE_ESTABLISHED)
+    return {
+        "listening_ports": listening_ports,
+        "established_connections": established_connections,
+    }
+
+
+def parse_ports(raw_ports):
+    ports = set()
+    for item in raw_ports.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            ports.add(int(item))
+        except ValueError:
+            continue
+    return ports
+
+
+def evaluate_network_security(args, monitored_services):
+    rate = get_network_rate(args.network_sample_seconds)
+    tcp_summary = get_tcp_summary()
+    monitored_ports = {service["port"] for service in monitored_services if service.get("port")}
+    allowed_ports = parse_ports(args.allowed_listen_ports) | monitored_ports
+    unexpected_ports = [port for port in tcp_summary["listening_ports"] if port not in allowed_ports]
+    events = []
+
+    if args.max_rx_mbps and rate["rx_mbps"] >= args.max_rx_mbps:
+        events.append(f"Reception reseau elevee: {rate['rx_mbps']} Mbps")
+    if args.max_tx_mbps and rate["tx_mbps"] >= args.max_tx_mbps:
+        events.append(f"Emission reseau elevee: {rate['tx_mbps']} Mbps")
+    if args.max_connections and tcp_summary["established_connections"] >= args.max_connections:
+        events.append(f"Trop de connexions TCP etablies: {tcp_summary['established_connections']}")
+    if unexpected_ports:
+        events.append("Ports en ecoute non autorises: " + ", ".join(str(port) for port in unexpected_ports))
+
+    return {
+        "status": "suspicious" if events else "normal",
+        "events": events,
+        "rx_mbps": rate["rx_mbps"],
+        "tx_mbps": rate["tx_mbps"],
+        "established_connections": tcp_summary["established_connections"],
+        "listening_ports": tcp_summary["listening_ports"],
+        "allowed_listen_ports": sorted(allowed_ports),
+    }
+
+
 def command_succeeds(command):
     try:
         result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=3)
@@ -135,6 +242,7 @@ def parse_services(raw_services):
 
 def build_payload(args):
     hostname = args.hostname or socket.gethostname()
+    services = parse_services(args.services)
     return {
         "hostname": hostname,
         "ip_address": args.ip_address or get_primary_ip(),
@@ -150,7 +258,8 @@ def build_payload(args):
             "disk_usage": get_disk_usage(args.disk_path),
             "network_latency": get_latency(args.latency_host),
         },
-        "services": parse_services(args.services),
+        "services": services,
+        "network_security": evaluate_network_security(args, services),
     }
 
 
@@ -180,13 +289,18 @@ def main():
     parser.add_argument("--agent-name", default=os.getenv("AGENT_NAME", ""))
     parser.add_argument("--disk-path", default=os.getenv("AGENT_DISK_PATH", "/"))
     parser.add_argument("--latency-host", default=os.getenv("AGENT_LATENCY_HOST", "8.8.8.8"))
+    parser.add_argument("--allowed-listen-ports", default=os.getenv("MONITOR_ALLOWED_LISTEN_PORTS", "22,80,443"))
+    parser.add_argument("--max-rx-mbps", type=float, default=float(os.getenv("MONITOR_MAX_RX_MBPS", "80")))
+    parser.add_argument("--max-tx-mbps", type=float, default=float(os.getenv("MONITOR_MAX_TX_MBPS", "80")))
+    parser.add_argument("--max-connections", type=int, default=int(os.getenv("MONITOR_MAX_CONNECTIONS", "200")))
+    parser.add_argument("--network-sample-seconds", type=float, default=float(os.getenv("MONITOR_NETWORK_SAMPLE_SECONDS", "1")))
     parser.add_argument(
         "--services",
         default=os.getenv("MONITOR_SERVICES", "apache2:80:tcp:critical"),
         help="Format: nom:port:protocole:criticite,exemple apache2:80:tcp:critical",
     )
     parser.add_argument("--once", action="store_true", help="Envoie une seule mesure puis quitte.")
-    parser.add_argument("--interval", type=int, default=int(os.getenv("AGENT_INTERVAL", "60")))
+    parser.add_argument("--interval", type=int, default=int(os.getenv("AGENT_INTERVAL", "5")))
     args = parser.parse_args()
 
     if not args.token:

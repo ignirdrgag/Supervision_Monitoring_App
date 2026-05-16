@@ -23,9 +23,6 @@ def _dedupe_emails(emails):
 
 def get_alert_recipients():
     routed_email = AdminNotificationRouting.objects.filter(pk=1).values_list("active_admin_email", flat=True).first()
-    if routed_email:
-        return [routed_email]
-
     configured = list(getattr(settings, "ALERT_EMAIL_RECIPIENTS", []))
     admin_email = getattr(settings, "ALERT_ADMIN_EMAIL", "")
 
@@ -35,7 +32,7 @@ def get_alert_recipients():
     ).values_list("email", flat=True)
     superuser_emails = User.objects.filter(is_active=True, email__gt="", is_superuser=True).values_list("email", flat=True)
 
-    return _dedupe_emails([admin_email, *configured, *staff_emails, *superuser_emails])
+    return _dedupe_emails([routed_email, admin_email, *configured, *staff_emails, *superuser_emails])
 
 
 def _alert_context(alert: Alert):
@@ -81,6 +78,17 @@ def _alert_context(alert: Alert):
                 "Verifier l'espace: df -h",
                 "Identifier les gros repertoires: du -xh / | sort -h",
                 "Purger uniquement les fichiers de logs ou temporaires valides par l'equipe.",
+            ],
+        }
+    if "trafic" in title or "suspect" in title:
+        return {
+            "category": "securite-reseau",
+            "impact": "Risque de scan, exfiltration, service non autorise ou saturation du lien.",
+            "actions": [
+                "Verifier les connexions actives: ss -tunap",
+                "Controler les ports en ecoute: ss -lntup",
+                "Comparer avec les services autorises sur cette machine.",
+                "Isoler le serveur si le trafic n'est pas legitime.",
             ],
         }
     if "latence" in title or "reseau" in title:

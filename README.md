@@ -31,14 +31,14 @@ frontend/
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\activate
+. .venv/bin/activate
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py loaddata demo
-python manage.py runserver 8000
+python manage.py runserver 0.0.0.0:8000
 ```
 
-API disponible sur `http://localhost:8000/api/`.
+API disponible sur `http://192.168.1.116:8000/api/` depuis le reseau local.
 
 Si `python -m venv` echoue sur Ubuntu/Debian, installe d'abord `python3.12-venv`.
 
@@ -47,19 +47,17 @@ Si `python -m venv` echoue sur Ubuntu/Debian, installe d'abord `python3.12-venv`
 ```bash
 cd frontend
 npm install
-npm run dev
+VITE_API_BASE=http://192.168.1.116:8000/api npm run dev -- --host 0.0.0.0
 ```
 
-Interface disponible sur l'URL affichee par Vite, en general `http://localhost:5173`.
+Interface disponible sur `http://192.168.1.116:5173`.
 
-## Demarrage avec Docker
+Pour eviter de retaper ces commandes, tu peux utiliser:
 
 ```bash
-docker compose up --build
+./scripts/start-backend.sh
+./scripts/start-frontend.sh
 ```
-
-Backend : `http://localhost:8000/api/`
-Frontend : `http://localhost:5173`
 
 ## Agents IA
 
@@ -118,10 +116,10 @@ export MONITOR_SERVICES=apache2:80:tcp:critical
 python3 linux_agent.py --once
 ```
 
-Pour superviser Apache en continu toutes les 60 secondes :
+Pour superviser Apache en continu toutes les 5 secondes :
 
 ```bash
-python3 linux_agent.py --interval 60
+python3 linux_agent.py --interval 5
 ```
 
 Format de `MONITOR_SERVICES` :
@@ -149,7 +147,7 @@ After=network-online.target
 Environment=SUPERVISION_API_URL=http://IP_DU_BACKEND:8000/api
 Environment=AGENT_INGEST_TOKEN=token-long-et-secret
 Environment=MONITOR_SERVICES=apache2:80:tcp:critical
-ExecStart=/usr/bin/python3 /opt/supervision-ia/linux_agent.py --interval 60
+ExecStart=/usr/bin/python3 /opt/supervision-ia/linux_agent.py --interval 5
 Restart=always
 RestartSec=10
 

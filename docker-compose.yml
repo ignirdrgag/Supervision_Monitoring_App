@@ -20,6 +20,7 @@ services:
       - EMAIL_SSL_VERIFY=${EMAIL_SSL_VERIFY:-true}
       - EMAIL_TIMEOUT=${EMAIL_TIMEOUT:-20}
       - DEFAULT_FROM_EMAIL=${DEFAULT_FROM_EMAIL:-monitoringentreprise@gmail.com}
+      - AGENT_INGEST_TOKEN=${AGENT_INGEST_TOKEN:-token-long-et-secret}
     volumes:
       - ./backend:/app
 

@@ -246,6 +246,29 @@ def _evaluate_service_health(server, service):
     return alert
 
 
+def _evaluate_network_security(server, network_security):
+    if not network_security or network_security.get("status") != "suspicious":
+        return None
+
+    events = network_security.get("events") or ["Anomalie reseau detectee par l'agent."]
+    description = "\n".join(
+        [
+            "Trafic reseau suspect detecte sur la machine supervisee.",
+            f"Debit entrant: {network_security.get('rx_mbps', 0)} Mbps",
+            f"Debit sortant: {network_security.get('tx_mbps', 0)} Mbps",
+            f"Connexions TCP etablies: {network_security.get('established_connections', 0)}",
+            "Evenements:",
+            *[f"- {event}" for event in events],
+        ]
+    )
+    return _create_open_alert(
+        server,
+        "Trafic reseau suspect",
+        description,
+        Alert.Severity.WARNING,
+    )
+
+
 @api_view(["GET"])
 def dashboard(request):
     server_counts = Server.objects.values("status").annotate(count=Count("id"))
@@ -376,6 +399,8 @@ def agent_ingest(request):
             },
         )
         _evaluate_service_health(server, service)
+
+    _evaluate_network_security(server, request.data.get("network_security") or {})
 
     return Response({"server": ServerSerializer(server).data, "agent": MonitoringAgentSerializer(agent).data})
 
