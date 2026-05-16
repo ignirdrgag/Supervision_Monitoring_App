@@ -6,12 +6,14 @@ import {
   Bot,
   CheckCircle2,
   Database,
+  FileText,
   Gauge,
   Lock,
   LogOut,
   Mail,
   Network,
   PlayCircle,
+  Power,
   RefreshCw,
   Send,
   Server,
@@ -439,7 +441,7 @@ function Dashboard({ data }) {
   );
 }
 
-function Infrastructure({ servers }) {
+function Infrastructure({ servers, onReboot }) {
   return (
     <section className="panel wide">
       <div className="panel-head">
@@ -457,7 +459,13 @@ function Infrastructure({ servers }) {
                 <h3>{server.hostname}</h3>
                 <p>{server.os_family} - {server.environment}</p>
               </div>
-              <StatusPill value={server.status} />
+              <div className="inventory-actions">
+                <StatusPill value={server.status} />
+                <button className="small-action danger-action" onClick={() => onReboot(server)}>
+                  <Power size={16} />
+                  <span>Redemarrer</span>
+                </button>
+              </div>
             </div>
             <div className="service-stack">
               {server.services.map((service) => (
@@ -667,6 +675,45 @@ function App() {
     }
   }
 
+  async function downloadReport() {
+    setOperation("Generation du rapport PDF...");
+    try {
+      const token = localStorage.getItem("supervision_token");
+      const response = await fetch(`${API_BASE}/reports/pdf/`, {
+        headers: token ? { Authorization: `Token ${token}` } : {},
+      });
+      if (!response.ok) {
+        throw new Error(`Erreur rapport PDF ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `rapport-supervision-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setOperation("Rapport PDF genere.");
+    } catch (err) {
+      setOperation(err.message);
+    }
+  }
+
+  async function rebootServer(server) {
+    const confirmed = window.confirm(`Redemarrer ${server.hostname} (${server.ip_address}) ?`);
+    if (!confirmed) return;
+
+    setOperation(`Demande de redemarrage envoyee pour ${server.hostname}...`);
+    try {
+      await api(`/servers/${server.id}/reboot/`, { method: "POST" });
+      setOperation("Commande creee. L'agent l'executera au prochain heartbeat si ALLOW_REMOTE_REBOOT=true.");
+      setRefreshKey((key) => key + 1);
+    } catch (err) {
+      setOperation(err.message);
+    }
+  }
+
   if (!user) {
     return <AuthScreen onAuth={setUser} />;
   }
@@ -705,6 +752,10 @@ function App() {
             <RefreshCw size={18} />
             <span>Actualiser</span>
           </button>
+          <button className="refresh" onClick={downloadReport}>
+            <FileText size={18} />
+            <span>Rapport PDF</span>
+          </button>
           <button className="refresh primary-refresh" onClick={runMonitoringCycle}>
             <Send size={18} />
             <span>Simuler cycle</span>
@@ -716,7 +767,7 @@ function App() {
         {loading && <div className="empty-state">Chargement des donnees de supervision...</div>}
         {error && <div className="empty-state error">Backend indisponible: {error}</div>}
         {data && view === "dashboard" && <Dashboard data={data} />}
-        {data && view === "infra" && <Infrastructure servers={data.servers} />}
+        {data && view === "infra" && <Infrastructure servers={data.servers} onReboot={rebootServer} />}
         {data && view === "topology" && <Topology topology={data.topology} />}
         {data && view === "alerts" && <Alerts alerts={data.alerts} />}
         {data && view === "agents" && <Agents ai={data.ai} />}

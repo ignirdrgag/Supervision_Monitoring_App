@@ -142,6 +142,7 @@ class AdminNotificationRouting(models.Model):
 class AdministrationAction(models.Model):
     class ActionType(models.TextChoices):
         RESTART_SERVICE = "restart_service", "Redemarrer service"
+        REBOOT_SERVER = "reboot_server", "Redemarrer serveur"
         PATCH_SERVER = "patch_server", "Appliquer correctifs"
         ISOLATE_SERVER = "isolate_server", "Isoler serveur"
         RUN_DIAGNOSTIC = "run_diagnostic", "Diagnostic"

@@ -93,6 +93,7 @@ Environment=SUPERVISION_API_URL=http://192.168.1.116:8000/api
 Environment=AGENT_INGEST_TOKEN=token-long-et-secret
 Environment=MONITOR_SERVICES=ssh:22:tcp:high,apache2:80:tcp:critical
 Environment=MONITOR_ALLOWED_LISTEN_PORTS=22,80,443
+Environment=ALLOW_REMOTE_REBOOT=true
 ExecStart=/usr/bin/python3 /opt/supervision-ia/linux_agent.py --interval 5
 Restart=always
 RestartSec=10
@@ -108,6 +109,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now supervision-agent
 sudo systemctl status supervision-agent
 ```
+
+`ALLOW_REMOTE_REBOOT=true` est obligatoire pour autoriser le bouton `Redemarrer` depuis le superviseur. Sans cette variable, l'agent refuse la commande et marque l'action en echec.
 
 ## 6. Alerte quand une machine ne repond plus
 

@@ -277,6 +277,70 @@ def post_payload(api_url, token, payload):
         return response.status, response.read().decode("utf-8")
 
 
+def post_command_result(api_url, token, command_id, status, detail):
+    request = urllib.request.Request(
+        api_url.rstrip("/") + f"/agents/commands/{command_id}/complete/",
+        data=json.dumps({"status": status, "detail": detail}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "X-Agent-Token": token,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return response.status
+
+
+def execute_reboot_command(args, command):
+    command_id = command.get("id")
+    if not args.allow_remote_reboot:
+        post_command_result(
+            args.api_url,
+            args.token,
+            command_id,
+            "failed",
+            "Redemarrage refuse: ALLOW_REMOTE_REBOOT n'est pas active sur l'agent.",
+        )
+        return "reboot refused"
+
+    try:
+        result = subprocess.run(
+            ["/usr/bin/systemctl", "reboot"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError) as exc:
+        post_command_result(args.api_url, args.token, command_id, "failed", str(exc))
+        return "reboot failed"
+
+    if result.returncode != 0:
+        post_command_result(
+            args.api_url,
+            args.token,
+            command_id,
+            "failed",
+            f"systemctl reboot a retourne {result.returncode}.",
+        )
+        return "reboot failed"
+
+    post_command_result(args.api_url, args.token, command_id, "success", "Commande de redemarrage acceptee.")
+    return "reboot requested"
+
+
+def handle_commands(args, response_body):
+    try:
+        payload = json.loads(response_body)
+    except json.JSONDecodeError:
+        return
+
+    for command in payload.get("commands", []):
+        if command.get("action_type") == "reboot_server":
+            result = execute_reboot_command(args, command)
+            print(f"COMMANDE {command.get('id')}: {result}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Agent de monitoring Linux pour Supervision IA.")
     parser.add_argument("--api-url", default=os.getenv("SUPERVISION_API_URL", "http://127.0.0.1:8000/api"))
@@ -295,6 +359,12 @@ def main():
     parser.add_argument("--max-connections", type=int, default=int(os.getenv("MONITOR_MAX_CONNECTIONS", "200")))
     parser.add_argument("--network-sample-seconds", type=float, default=float(os.getenv("MONITOR_NETWORK_SAMPLE_SECONDS", "1")))
     parser.add_argument(
+        "--allow-remote-reboot",
+        action="store_true",
+        default=os.getenv("ALLOW_REMOTE_REBOOT", "false").lower() == "true",
+        help="Autorise l'agent a redemarrer la machine sur commande du superviseur.",
+    )
+    parser.add_argument(
         "--services",
         default=os.getenv("MONITOR_SERVICES", "apache2:80:tcp:critical"),
         help="Format: nom:port:protocole:criticite,exemple apache2:80:tcp:critical",
@@ -311,6 +381,7 @@ def main():
         try:
             status_code, response_body = post_payload(args.api_url, args.token, payload)
             print(f"OK {status_code}: {response_body}")
+            handle_commands(args, response_body)
         except urllib.error.HTTPError as exc:
             print(f"ERREUR HTTP {exc.code}: {exc.read().decode('utf-8')}")
         except urllib.error.URLError as exc:

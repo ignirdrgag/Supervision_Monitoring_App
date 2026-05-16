@@ -1,7 +1,10 @@
 import random
+import unicodedata
+from datetime import datetime
 
 from django.contrib.auth import authenticate
 from django.conf import settings
+from django.http import HttpResponse
 from django.db.models import Count
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
@@ -85,6 +88,21 @@ class ServerViewSet(viewsets.ModelViewSet):
     queryset = Server.objects.prefetch_related("services", "metrics", "alerts").all()
     serializer_class = ServerSerializer
 
+    @action(detail=True, methods=["post"])
+    def reboot(self, request, pk=None):
+        server = self.get_object()
+        action_obj = AdministrationAction.objects.create(
+            action_type=AdministrationAction.ActionType.REBOOT_SERVER,
+            target_server=server,
+            requested_by=request.user.username,
+            status=AdministrationAction.Status.APPROVED,
+            notes=(
+                "Redemarrage serveur demande depuis la console de supervision. "
+                "L'agent executera la commande au prochain heartbeat si ALLOW_REMOTE_REBOOT=true."
+            ),
+        )
+        return Response(AdministrationActionSerializer(action_obj).data, status=status.HTTP_201_CREATED)
+
 
 class ServiceViewSet(viewsets.ModelViewSet):
     queryset = Service.objects.select_related("server").all()
@@ -134,6 +152,11 @@ class AdministrationActionViewSet(viewsets.ModelViewSet):
             action_obj.target_service.status = Service.Status.RUNNING
             action_obj.target_service.last_check = timezone.now()
             action_obj.target_service.save(update_fields=["status", "last_check"])
+        elif action_obj.action_type == AdministrationAction.ActionType.REBOOT_SERVER:
+            action_obj.status = AdministrationAction.Status.APPROVED
+            action_obj.notes = f"{action_obj.notes}\nRedemarrage transmis a l'agent.".strip()
+            action_obj.save(update_fields=["status", "notes", "updated_at"])
+            return Response(self.get_serializer(action_obj).data)
         elif action_obj.action_type == AdministrationAction.ActionType.RUN_DIAGNOSTIC:
             MetricSnapshot.objects.create(
                 server=action_obj.target_server,
@@ -269,6 +292,22 @@ def _evaluate_network_security(server, network_security):
     )
 
 
+def _pending_agent_commands(server):
+    actions = AdministrationAction.objects.filter(
+        target_server=server,
+        target_service__isnull=True,
+        action_type=AdministrationAction.ActionType.REBOOT_SERVER,
+        status=AdministrationAction.Status.APPROVED,
+    )[:1]
+    commands = []
+    for action_obj in actions:
+        action_obj.status = AdministrationAction.Status.RUNNING
+        action_obj.notes = f"{action_obj.notes}\nCommande remise a l'agent a {timezone.now().isoformat()}.".strip()
+        action_obj.save(update_fields=["status", "notes", "updated_at"])
+        commands.append({"id": action_obj.id, "action_type": action_obj.action_type})
+    return commands
+
+
 @api_view(["GET"])
 def dashboard(request):
     server_counts = Server.objects.values("status").annotate(count=Count("id"))
@@ -402,7 +441,152 @@ def agent_ingest(request):
 
     _evaluate_network_security(server, request.data.get("network_security") or {})
 
-    return Response({"server": ServerSerializer(server).data, "agent": MonitoringAgentSerializer(agent).data})
+    return Response(
+        {
+            "server": ServerSerializer(server).data,
+            "agent": MonitoringAgentSerializer(agent).data,
+            "commands": _pending_agent_commands(server),
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def agent_command_complete(request, action_id):
+    expected_token = getattr(settings, "AGENT_INGEST_TOKEN", "")
+    provided_token = request.headers.get("X-Agent-Token", "")
+    if expected_token and provided_token != expected_token:
+        return Response({"detail": "Token agent invalide."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        action_obj = AdministrationAction.objects.get(pk=action_id)
+    except AdministrationAction.DoesNotExist:
+        return Response({"detail": "Commande introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+    result_status = request.data.get("status")
+    detail = request.data.get("detail", "")
+    action_obj.status = (
+        AdministrationAction.Status.SUCCESS
+        if result_status == "success"
+        else AdministrationAction.Status.FAILED
+    )
+    action_obj.notes = f"{action_obj.notes}\nRetour agent: {detail or result_status}.".strip()
+    action_obj.save(update_fields=["status", "notes", "updated_at"])
+    return Response(AdministrationActionSerializer(action_obj).data)
+
+
+def _ascii_text(value):
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    return normalized.encode("ascii", "ignore").decode("ascii")
+
+
+def _pdf_escape(value):
+    return _ascii_text(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _pdf_text(x, y, text, size=10, color="0.10 0.16 0.25"):
+    return f"BT /F1 {size} Tf {color} rg {x} {y} Td ({_pdf_escape(text)}) Tj ET\n"
+
+
+def _pdf_rect(x, y, width, height, color):
+    return f"{color} rg {x} {y} {width} {height} re f\n"
+
+
+def _build_monitoring_pdf():
+    servers = list(Server.objects.prefetch_related("services", "alerts", "metrics").all())
+    alerts = list(Alert.objects.select_related("server", "service").all()[:8])
+    notifications = list(AlertNotification.objects.select_related("alert").all()[:6])
+    width, height = 595, 842
+    content = []
+
+    content.append(_pdf_rect(0, 0, width, height, "0.95 0.97 1"))
+    content.append(_pdf_rect(0, 760, width, 82, "0.06 0.13 0.25"))
+    content.append(_pdf_text(40, 802, "Rapport de supervision", 22, "1 1 1"))
+    content.append(_pdf_text(40, 780, f"Genere le {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", 10, "0.82 0.88 0.96"))
+
+    open_alerts = Alert.objects.filter(status=Alert.Status.OPEN).count()
+    critical_alerts = Alert.objects.filter(status=Alert.Status.OPEN, severity=Alert.Severity.CRITICAL).count()
+    active_agents = MonitoringAgent.objects.filter(status=MonitoringAgent.Status.ACTIVE).count()
+    stats = [
+        ("Serveurs", Server.objects.count(), "0.86 0.92 1"),
+        ("Services", Service.objects.count(), "0.84 0.97 0.89"),
+        ("Alertes ouvertes", open_alerts, "1 0.93 0.84"),
+        ("Critiques", critical_alerts, "1 0.88 0.88"),
+        ("Agents actifs", active_agents, "0.91 0.89 1"),
+    ]
+    x = 40
+    for label, value, color in stats:
+        content.append(_pdf_rect(x, 700, 96, 44, color))
+        content.append(_pdf_text(x + 10, 724, label, 8))
+        content.append(_pdf_text(x + 10, 706, value, 16, "0.06 0.13 0.25"))
+        x += 104
+
+    y = 660
+    content.append(_pdf_text(40, y, "Inventaire et dernieres metriques", 14))
+    y -= 24
+    content.append(_pdf_rect(40, y - 6, 515, 20, "0.88 0.92 0.97"))
+    content.append(_pdf_text(50, y, "Serveur", 9))
+    content.append(_pdf_text(205, y, "IP", 9))
+    content.append(_pdf_text(300, y, "Statut", 9))
+    content.append(_pdf_text(380, y, "CPU/RAM/Disque", 9))
+    y -= 24
+
+    for server in servers[:10]:
+        metric = server.metrics.first()
+        metric_text = "N/A"
+        if metric:
+            metric_text = f"{metric.cpu_usage}% / {metric.memory_usage}% / {metric.disk_usage}%"
+        content.append(_pdf_text(50, y, server.hostname, 9))
+        content.append(_pdf_text(205, y, server.ip_address, 9))
+        content.append(_pdf_text(300, y, server.status, 9))
+        content.append(_pdf_text(380, y, metric_text, 9))
+        y -= 18
+
+    y -= 16
+    content.append(_pdf_text(40, y, "Alertes recentes", 14))
+    y -= 22
+    for alert in alerts:
+        service = alert.service.name if alert.service else "serveur"
+        content.append(_pdf_text(50, y, f"[{alert.severity}] {alert.server.hostname} - {service}", 9, "0.55 0.12 0.12"))
+        y -= 13
+        content.append(_pdf_text(62, y, alert.title, 9))
+        y -= 17
+
+    y -= 8
+    content.append(_pdf_text(40, y, "Dernieres notifications email", 14))
+    y -= 22
+    for notification in notifications:
+        content.append(_pdf_text(50, y, f"{notification.recipient} - {notification.status}", 9))
+        y -= 15
+
+    stream = "".join(content).encode("latin-1", errors="ignore")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"endstream",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{index} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii"))
+    return bytes(pdf)
+
+
+@api_view(["GET"])
+def report_pdf(request):
+    response = HttpResponse(_build_monitoring_pdf(), content_type="application/pdf")
+    response["Content-Disposition"] = 'attachment; filename="rapport-supervision.pdf"'
+    return response
 
 
 @api_view(["POST"])

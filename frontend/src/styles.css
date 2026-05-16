@@ -424,6 +424,7 @@ td span,
 .pill-active,
 .pill-sent,
 .pill-success,
+.pill-approved,
 .pill-resolved {
   background: #dcfce7;
   color: #166534;
@@ -511,6 +512,14 @@ td span,
   justify-content: space-between;
 }
 
+.inventory-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .service-line {
   background: #f7f9fc;
   border-radius: 8px;
@@ -579,6 +588,16 @@ td span {
 
 .small-action:hover {
   background: #eaf1fb;
+}
+
+.danger-action {
+  background: #fff1f2;
+  border-color: #fecdd3;
+  color: #9f1239;
+}
+
+.danger-action:hover {
+  background: #ffe4e6;
 }
 
 .topology-map {

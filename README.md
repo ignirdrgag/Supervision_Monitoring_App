@@ -147,6 +147,7 @@ After=network-online.target
 Environment=SUPERVISION_API_URL=http://IP_DU_BACKEND:8000/api
 Environment=AGENT_INGEST_TOKEN=token-long-et-secret
 Environment=MONITOR_SERVICES=apache2:80:tcp:critical
+Environment=ALLOW_REMOTE_REBOOT=true
 ExecStart=/usr/bin/python3 /opt/supervision-ia/linux_agent.py --interval 5
 Restart=always
 RestartSec=10

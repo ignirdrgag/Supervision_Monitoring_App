@@ -11,12 +11,14 @@ from .views import (
     ServiceViewSet,
     ai_analysis,
     agent_ingest,
+    agent_command_complete,
     dashboard,
     login,
     logout,
     me,
     register,
     simulate_monitoring,
+    report_pdf,
     topology,
 )
 
@@ -38,7 +40,9 @@ urlpatterns = [
     path("dashboard/", dashboard, name="dashboard"),
     path("ai/analysis/", ai_analysis, name="ai-analysis"),
     path("agents/ingest/", agent_ingest, name="agent-ingest"),
+    path("agents/commands/<int:action_id>/complete/", agent_command_complete, name="agent-command-complete"),
     path("monitoring/simulate/", simulate_monitoring, name="simulate-monitoring"),
+    path("reports/pdf/", report_pdf, name="report-pdf"),
     path("topology/", topology, name="topology"),
     path("", include(router.urls)),
 ]
